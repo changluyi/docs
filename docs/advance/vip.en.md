@@ -16,9 +16,11 @@ metadata:
   name: vip-dynamic-01
 spec:
   subnet: ovn-default
+  type: ""
 ```
 
 - `subnet`: reserve the IP from this Subnet.
+- `type`: Currently, two types are supported. If the value is empty, it indicates that it is only used for occupying ip addresses of ipam. `switch_lb_vip` The front-end vip address and back-end ip address of the switch lb must be on the same subnet.
 
 Query the VIP after creation.
 
@@ -41,11 +43,11 @@ metadata:
   name: static-vip01
 spec:
   subnet: ovn-default 
-  v4Ip: "10.16.0.121"
+  V4ip: "10.16.0.121"
 ```
 
 - `subnet`: reserve the IP from this Subnet.
-- `v4Ip`: A fixed-assigned IP address that should within the CIDR range of `subnet`.
+- `V4ip`: A fixed-assigned IP address that should within the CIDR range of `subnet`.
 
 Query the VIP after creation:
 

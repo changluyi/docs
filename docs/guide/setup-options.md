@@ -92,7 +92,7 @@ args:
 用户可以通过 tcpdump 及其他工具进行流量分析，该功能可以在安装脚本中通过下面的配置开启：
 
 ```bash
-ENABLE_MIRROR=tue
+ENABLE_MIRROR=true
 ```
 
 也可在安装后通过修改 `kube-ovn-cni` DaemonSet 的参数方式进行调整:
@@ -123,6 +123,8 @@ args:
 ```
 
 LB 的功能在默认安装中为开启。
+
+从 Kube-OVN v1.12.0 版本开始，在 subnet crd 定义中增加了 spec 字段 `enableLb`，将 Kube-OVN 的 LB 功能迁移到子网层级，可以基于不同的子网分别设置是否开启 LB 功能。`kube-ovn-controller` Deployment 中的 `enable-lb` 参数作为全局参数，控制是否创建 load-balancer 记录，子网中新增的 `enableLb` 参数用于控制子网是否关联 load-balancer 记录。之前版本升级到 v1.12.0 之后，子网 `enableLb` 参数会自动继承原有的全局开关参数取值。
 
 ## NetworkPolicy 开启设置
 
@@ -192,6 +194,8 @@ args:
 - --enable-ecmp=true 
 ```
 
+从 Kube-OVN v1.12.0 版本开始，在 subnet crd 定义中增加了 spec 字段 `enableEcmp`，将集中式子网 ECMP 开关控制迁移到子网层级，可以基于不同的子网分别设置是否开启 ECMP 模式。原有的 `kube-ovn-controller` Deployment 中的 `enable-ecmp` 参数不再使用。之前版本升级到 v1.12.0 之后，子网开关会自动继承原有的全局开关参数取值。
+
 集中式网关默认安装下为主备模式，更多网关相关内容请参考[子网使用](./subnet.md)。
 
 ## Kubevirt VM 固定地址开启设置
@@ -253,6 +257,7 @@ env:
 不同协议在实际使用中的区别请参考[隧道协议说明](../reference/tunnel-protocol.md)。
 
 ## SSL 设置
+
 OVN DB 的 API 接口支持 SSL 加密来保证连接安全，如要开启可调整安装脚本中的如下参数:
 
 ```bash
@@ -260,3 +265,26 @@ ENABLE_SSL=true
 ```
 
 SSL 功能默认安装下为关闭模式。
+
+## 绑定本地 ip
+
+kube-ovn-controller/kube-ovn-cni/kube-ovn-monitor 这些服务支持绑定本地 ip，该功能设计原因主要是因为某些场景下出于安全考虑不允许服务绑定 0.0.0.0 （比如该服务部署在某个对外网关上，外部用户可以直接通过公网 ip 并指定端口去访问到该服务），该功能默认是打开的，由安装脚本中如下参数控制：
+
+```bash
+ENABLE_BIND_LOCAL_IP=true
+```
+
+以 kube-ovn-monitor 为例，开启功能后会把服务绑定本地的 pod ip 如下：
+
+```bash
+# netstat -tunlp |grep kube-ovn
+tcp        0      0 172.18.0.5:10661        0.0.0.0:*               LISTEN      2612/./kube-ovn-mon
+```
+
+安装后也可通过修改服务的 deployment 或者 daemonSet 的环境变量参数进行调整：
+
+```yaml
+env:
+- name: ENABLE_BIND_LOCAL_IP
+  value: "false"
+```

@@ -4,6 +4,7 @@ VPC 互联提供了一种将两个 VPC 网络通过逻辑路由打通的机制�
 通过私有地址相互访问，无需通过外部网关进行 NAT 转发。
 
 ## 前提条件
+
 1. 该功能只适用于用户自定义 VPC。
 2. 为了避免路由重叠两个 VPC 内的子网 CIDR 不能重叠。
 3. 目前只支持两个 VPC 的互联，更多组 VPC 之间的互联暂不支持。
@@ -77,7 +78,7 @@ spec:
 - `cidr`：另一端 Subnet 的 CIDR。
 - `nextHopIP`：互联 VPC 另一端的 `localConnectIP`。
 
-分别在两个Subnet下创建Pod
+分别在两个 Subnet 下创建 Pod
 
 ```yaml
 apiVersion: v1
@@ -89,7 +90,7 @@ metadata:
 spec:
   containers:
     - name: vpc-1-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ---
 apiVersion: v1
 kind: Pod
@@ -100,7 +101,7 @@ metadata:
 spec:
   containers:
     - name: vpc-2-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ```
 
 测试网络连通性

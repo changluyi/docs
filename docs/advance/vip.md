@@ -16,9 +16,11 @@ metadata:
   name: vip-dynamic-01
 spec:
   subnet: ovn-default
+  type: ""
 ```
 
 - `subnet`: 将从该 Subnet 中预留 IP。
+- `type`: 目前支持两种类型，为空表示仅用于 ipam ip 占位，`switch_lb_vip` 表示该 vip 仅用于 switch lb 前端 vip 和后端 ip 需处于同一子网。
 
 创建成功后查询该 VIP：
 
@@ -41,11 +43,11 @@ metadata:
   name: static-vip01
 spec:
   subnet: ovn-default 
-  v4Ip: "10.16.0.121"
+  v4ip: "10.16.0.121"
 ```
 
 - `subnet`: 将从该 Subnet 中预留 IP。
-- `v4Ip`: 固定分配的 IP 地址，该地址需在 `subnet` 的 CIDR 范围内。
+- `v4ip`: 固定分配的 IP 地址，该地址需在 `subnet` 的 CIDR 范围内。
 
 创建成功后查询该 VIP：
 
@@ -74,5 +76,5 @@ metadata:
 spec:
   containers:
     - name: static-ip
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ```

@@ -1,6 +1,6 @@
 # EIP and SNAT
 
-> This configuration is for the network under default VPC, 
+> This configuration is for the network under default VPC,
 > for custom VPC please refer to [VPC Gateway](./vpc.en.md#create-vpc-nat-gateway)
 
 Kube-OVN supports SNAT and EIP functionality at the Pod level using the L3 Gateway feature in OVN.
@@ -15,7 +15,6 @@ External services can access the Pod directly through the EIP, and the Pod will 
   The host must have other NICs for management.
 - Since packets passing through NAT will go directly to the Underlay network, it is important to confirm that such packets can pass safely on the current network architecture.
 - Currently, there is no conflict detection for EIP and SNAT addresses, and an administrator needs to manually assign them to avoid address conflicts.
-
 
 ## Create Config
 
@@ -45,7 +44,7 @@ data:
 
 ## Confirm the Configuration Take Effect
 
-Check the OVN-NB status to confirm that the `ovn-external` logical switch exists and that the correct address and 
+Check the OVN-NB status to confirm that the `ovn-external` logical switch exists and that the correct address and
 chassis are bound to the `ovn-cluster-ovn-external` logical router port.
 
 ```bash
@@ -95,7 +94,7 @@ metadata:
 spec:
   containers:
   - name: snat-pod
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ---
 apiVersion: v1
 kind: Pod
@@ -106,16 +105,18 @@ metadata:
 spec:
   containers:
   - name: eip-pod
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ```
 
-The EIP or SNAT rules configured by the Pod can be dynamically adjusted via kubectl or other tools, 
+The EIP or SNAT rules configured by the Pod can be dynamically adjusted via kubectl or other tools,
 remember to remove the `ovn.kubernetes.io/routed` annotation to trigger the routing change.
 
 ```bash
 kubectl annotate pod pod-gw ovn.kubernetes.io/eip=172.56.0.221 --overwrite
 kubectl annotate pod pod-gw ovn.kubernetes.io/routed-
 ```
+
+When the EIP or SNAT takes into effect, the `ovn.kubernetes.io/routed` annotation will be added back.
 
 ## Advanced Configuration
 

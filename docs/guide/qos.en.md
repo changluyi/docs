@@ -1,9 +1,11 @@
 # Manage QoS
 
-Kube-OVN supports two types of QoS:
+Kube-OVN supports two types of Pod level QoS:
 
 - Maximum bandwidth limit QoS.
 - `linux-netem`, QoS for simulating latency and packet loss that can be used for simulation testing.
+
+> Currently, only Pod level QoS is supported, and QoS restrictions at the Namespace or Subnet level are not supported.
 
 ## Maximum Bandwidth Limit QoS
 
@@ -22,7 +24,7 @@ metadata:
 spec:
   containers:
   - name: qos
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ```
 
 Use annotation to dynamically adjust QoS:
@@ -54,7 +56,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: kubeovn/perf
+        image: docker.io/kubeovn/perf
 ```
 
 Exec into one Pod and run iperf3 server:
@@ -126,7 +128,7 @@ iperf Done.
 
 ## linux-netem QoS
 
-Pod can use annotation below to config `linux-netem` type QoS： `ovn.kubernetes.io/latency`、`ovn.kubernetes.io/limit` and 
+Pod can use annotation below to config `linux-netem` type QoS： `ovn.kubernetes.io/latency`、`ovn.kubernetes.io/limit` and
 `ovn.kubernetes.io/loss`。
 
 - `ovn.kubernetes.io/latency`: Set the Pod traffic delay to an integer value in ms.

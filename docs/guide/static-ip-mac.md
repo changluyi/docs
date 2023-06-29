@@ -6,7 +6,7 @@ Kube-OVN 默认会根据 Pod 所在 Namespace 所属的子网中随机分配 IP 
 - 单个 Pod 固定 IP/Mac。
 - Workload 通用 IP Pool 方式指定固定地址范围。
 - StatefulSet 固定地址。
-- Kubevirt VM 固定地址。
+- KubeVirt VM 固定地址。
 
 ## 单个 Pod 固定 IP 和 Mac
 
@@ -18,14 +18,13 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: static-ip
-  namespace: ls1
   annotations:
-    ovn.kubernetes.io/ip_address: 10.16.0.15
+    ovn.kubernetes.io/ip_address: 10.16.0.15   // 双栈地址使用逗号分隔 10.16.0.15,fd00:10:16::15
     ovn.kubernetes.io/mac_address: 00:00:00:53:6B:B6
 spec:
   containers:
   - name: static-ip
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ```
 
 在使用 annotation 定义单个 Pod IP/Mac 时需要注意以下几点：
@@ -43,29 +42,29 @@ IP Pool 的 Annotation 需要加在 `template` 内的 `annotation` 字段，除�
 其他用户自定义的 Workload 也可以使用同样的方式进行固定地址分配。
 
 ### Deployment 固定 IP 示例
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: ls1
-  name: starter-backend
+  name: ippool
   labels:
-    app: starter-backend
+    app: ippool
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: starter-backend
+      app: ippool
   template:
     metadata:
       labels:
-        app: starter-backend
+        app: ippool
       annotations:
-        ovn.kubernetes.io/ip_pool: 10.16.0.15,10.16.0.16,10.16.0.17
+        ovn.kubernetes.io/ip_pool: 10.16.0.15,10.16.0.16,10.16.0.17 // 双栈地址使用分号进行分隔 10.16.0.15,fd00:10:16::000E;10.16.0.16,fd00:10:16::000F;10.16.0.17,fd00:10:16::0010
     spec:
       containers:
-      - name: backend
-        image: nginx:alpine
+      - name: ippool
+        image: docker.io/library/nginx:alpine
 ```
 
 对 Workload 使用固定 IP 需要注意以下几点：
@@ -75,6 +74,7 @@ spec:
 3. 当 `ovn.kubernetes.io/ip_pool` 中的 IP 数量小于 replicas 数量时，多出的 Pod 将无法创建。你需要根据 Workload 的更新策略以及扩容规划调整 `ovn.kubernetes.io/ip_pool` 中 IP 的数量。
 
 ## StatefulSet 固定地址
+
 StatefulSet 和其他 Workload 相同可以使用 `ovn.kubernetes.io/ip_pool` 来指定 Pod 使用的 IP。
 
 由于 StatefulSet 多用于有状态服务，对网络标示的固定有更高的要求，Kube-OVN 做了特殊的强化：
@@ -84,6 +84,7 @@ StatefulSet 和其他 Workload 相同可以使用 `ovn.kubernetes.io/ip_pool` �
 3. 基于 2 的能力，对于没有 `ovn.kubernetes.io/ip_pool` 注解的 StatefulSet，Pod 第一次生成时会随机分配 IP/Mac，之后在整个 StatefulSet 的生命周期内，网络信息都会保持固定。
 
 ### StatefulSet 示例
+
 ```yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -102,7 +103,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: nginx:alpine
+        image: docker.io/library/nginx:alpine
         ports:
         - containerPort: 80
           name: web
@@ -110,7 +111,7 @@ spec:
 
 可以尝试删除 StatefulSet 下 Pod 观察 Pod IP 变化信息。
 
-## Kubevirt VM 固定地址
+## KubeVirt VM 固定地址
 
-针对 Kubevirt 创建的 VM 实例，`kube-ovn-controller` 可以按照类似 StatefulSet Pod 的方式进行 IP 地址分配和管理。
+针对 KubeVirt 创建的 VM 实例，`kube-ovn-controller` 可以按照类似 StatefulSet Pod 的方式进行 IP 地址分配和管理。
 以达到 VM 实例在生命周期内启停，升级，迁移等操作过程中地址固定不变，更符虚拟化合用户的实际使用体验。

@@ -7,6 +7,7 @@ eSwitch 上执行。该技术可以在无需对 OVS 控制平面进行修改的�
 ![](../static/hw-offload.png)
 
 ## 前置条件
+
 - Mellanox CX5/CX6/CX7/BlueField 等支持 ASAP² 的硬件网卡。
 - CentOS 8 Stream 或上游 Linux 5.7 以上内核支持。
 - 由于当前网卡不支持 `dp_hash` 和 `hash` 操作卸载，需关闭 OVN LB 功能。
@@ -54,6 +55,7 @@ lrwxrwxrwx. 1 root root 0 Jul 22 23:16 p4p1 -> ../../devices/pci0000:40/0000:40:
 ```
 
 找到上述 VF 对应的设备 ID：
+
 ```bash
 # lspci -nn | grep ConnectX-5
 42:00.0 Ethernet controller [0200]: Mellanox Technologies MT27800 Family [ConnectX-5] [15b3:1017]
@@ -81,6 +83,7 @@ ethtool -K enp66s0f0 hw-tc-offload on
 ```
 
 重新绑定驱动，完成 VF 设置：
+
 ```bash
 echo 0000:42:00.2 > /sys/bus/pci/drivers/mlx5_core/bind
 echo 0000:42:00.3 > /sys/bus/pci/drivers/mlx5_core/bind
@@ -89,6 +92,7 @@ echo 0000:42:00.5 > /sys/bus/pci/drivers/mlx5_core/bind
 ```
 
 `NetworkManager` 的一些行为可能会导致驱动异常，如果卸载出现问题建议关闭 `NetworkManager` 再进行尝试：
+
 ```bash
 systemctl stop NetworkManager
 systemctl disable NetworkManager
@@ -98,6 +102,7 @@ systemctl disable NetworkManager
 资源进行调度。
 
 创建 SR-IOV 相关 Configmap：
+
 ```yaml
 apiVersion: v1
 kind: ConfigMap
@@ -164,9 +169,6 @@ kubectl apply -k sriov-network-operator/deploy
 NAME                                          READY   STATUS    RESTARTS   AGE
 pod/sriov-network-config-daemon-bf9nt         1/1     Running   0          8s
 pod/sriov-network-operator-54d7545f65-296gb   1/1     Running   0          10s
-
-NAME                             TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-service/sriov-network-operator   ClusterIP   10.102.53.223   <none>        8383/TCP   9s
 
 NAME                                         DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR                                                 AGE
 daemonset.apps/sriov-network-config-daemon   1         1         1       1            1           beta.kubernetes.io/os=linux,feature.node.kubernetes.io/network-sriov.capable=true   8s
@@ -377,6 +379,7 @@ wget https://raw.githubusercontent.com/alauda/kube-ovn/{{ variables.branch }}/di
 ```
 
 修改相关参数，`IFACE` 需要为物理网卡名，该网卡需要有可路由 IP：
+
 ```bash
 ENABLE_MIRROR=${ENABLE_MIRROR:-false}
 HW_OFFLOAD=${HW_OFFLOAD:-true}
@@ -404,7 +407,7 @@ metadata:
 spec:
   containers:
   - name: nginx
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
     resources:
       requests:
         mellanox.com/cx5_sriov_switchdev: '1'
@@ -413,7 +416,6 @@ spec:
 ```
 
 - `v1.multus-cni.io/default-network`: 为上一步骤中 `NetworkAttachmentDefinition` 的 {namespace}/{name}。
-
 
 可通过在 Pod 运行节点的 `ovs-ovn` 容器中运行下面的命令观察卸载是否成功：
 

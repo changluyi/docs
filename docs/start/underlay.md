@@ -8,7 +8,7 @@
 
 ## 功能限制
 
-由于该模式下容器网络直接使用物理网络进行二层包转发，Overlay 模式下的 SNAT/EIP， 分布式网关/集中式网关等 L3 功能无法使用。
+由于该模式下容器网络直接使用物理网络进行二层包转发，Overlay 模式下的 SNAT/EIP， 分布式网关/集中式网关等 L3 功能无法使用，VPC 级别的隔离也无法对 Underlay 子网生效。
 
 ## 和 Macvlan 比较
 
@@ -17,17 +17,18 @@ Kube-OVN 的 Underlay 模式和 Macvlan 工作模式十分类似，在功能和�
 1. 由于 Macvlan 的内核路径更短，并且不需要 OVS 对数据包进行处理，Macvlan 在吞吐量和延迟性能指标上表现会更好。
 2. Kube-OVN 通过流表提供了 arp-proxy 功能，可以缓解大规模网络下的 arp 广播风暴风险。
 3. 由于 Macvlan 工作在内核底层，会绕过宿主机的 netfilter，Service 和 NetworkPolicy 功能需要额外开发。Kube-OVN 通过 OVS 流表提供了 Service 和 NetworkPolicy 的能力。
-4. Kube-OVN 的 Underlay 模式相比 Macvlan 额外提供了地址管理，固定IP 和 QoS 等功能。
+4. Kube-OVN 的 Underlay 模式相比 Macvlan 额外提供了地址管理，固定 IP 和 QoS 等功能。
 
 ## 环境要求
 
-在 Underlay 模式下， OVS 将会桥接一个节点网卡到 OVS 网桥，并将数据包直接通过该节点网卡对外发送，L2/L3 层面的转发能力需要依赖底层网络设备。
+在 Underlay 模式下，OVS 将会桥接一个节点网卡到 OVS 网桥，并将数据包直接通过该节点网卡对外发送，L2/L3 层面的转发能力需要依赖底层网络设备。
 需要预先在底层网络设备配置对应的网关、Vlan 和安全策略等配置。
 
 1. 对于 OpenStack 的 VM 环境，需要将对应网络端口的 `PortSecurity` 关闭。
 2. 对于 VMware 的 vSwitch 网络，需要将 `MAC Address Changes`, `Forged Transmits` 和 `Promiscuous Mode Operation` 设置为 `allow`。
-3. 公有云，例如 AWS、GCE、阿里云等由于不支持用户自定义 Mac 无法支持 Underlay 模式网络。
-4. 桥接网卡不能为 Linux Bridge。
+3. 对于 Hyper-V 虚拟化，需要开启虚拟机网卡高级功能中的 `MAC Address Spoofing`。
+4. 公有云，例如 AWS、GCE、阿里云等由于不支持用户自定义 Mac 无法支持 Underlay 模式网络，在这种场景下如果想使用 Underlay 推荐使用对应公有云厂商提供的 VPC-CNI。
+5. 桥接网卡不能为 Linux Bridge。
 
 对于管理网和容器网使用同一个网卡的情况下，Kube-OVN 会将网卡的 Mac 地址、IP 地址、路由以及 MTU 将转移或复制至对应的 OVS Bridge，
 以支持单网卡部署 Underlay 网络。OVS Bridge 名称格式为 `br-PROVIDER_NAME`，`PROVIDER_NAME` 为 Provider 网络名称（默认为 provider）。
@@ -43,15 +44,18 @@ wget https://raw.githubusercontent.com/kubeovn/kube-ovn/{{ variables.branch }}/d
 ```
 
 ### 修改脚本中相应配置
+
 ```bash
-NETWORK_TYPE          # 设置为 vlan
-VLAN_INTERFACE_NAME   # 设置为宿主机上承担容器流量的网卡，例如 eth1
-VLAN_ID               # 交换机所接受的 VLAN Tag，若设置为 0 则不做 VLAN 封装
-POD_CIDR              # 设置为物理网络 CIDR， 例如 192.168.1.0/24
-POD_GATEWAY           # 设置为物理网络网关，例如192.168.1.1
-EXCLUDE_IPS           # 排除范围，避免容器网段和物理网络已用 IP 冲突，例如 192.168.1.1..192.168.1.100
-EXCHANGE_LINK_NAME    # 是否交换默认 provider-network 下 OVS 网桥和桥接网卡的名字，默认为 false
-LS_DNAT_MOD_DL_DST    # DNAT 时是否对 MAC 地址进行转换，可加速 Service 的访问，默认为 true
+ENABLE_ARP_DETECT_IP_CONFLICT # 如有需要，可以选择关闭 vlan 网络 arp 冲突检测
+NETWORK_TYPE                  # 设置为 vlan
+VLAN_INTERFACE_NAME           # 设置为宿主机上承担容器流量的网卡，例如 eth1
+VLAN_ID                       # 交换机所接受的 VLAN Tag，若设置为 0 则不做 VLAN 封装
+POD_CIDR                      # 设置为物理网络 CIDR， 例如 192.168.1.0/24
+POD_GATEWAY                   # 设置为物理网络网关，例如 192.168.1.1
+EXCLUDE_IPS                   # 排除范围，避免容器网段和物理网络已用 IP 冲突，例如 192.168.1.1..192.168.1.100
+ENABLE_LB                     # 如果 Underlay 子网需要使用 Service 需要设置为 true 
+EXCHANGE_LINK_NAME            # 是否交换默认 provider-network 下 OVS 网桥和桥接网卡的名字，默认为 false
+LS_DNAT_MOD_DL_DST            # DNAT 时是否对 MAC 地址进行转换，可加速 Service 的访问，默认为 true
 ```
 
 ### 运行安装脚本
@@ -140,6 +144,7 @@ spec:
 将 `vlan` 的值指定为需要使用的 VLAN 名称即可。多个 Subnet 可以引用同一个 VLAN。
 
 ## 容器创建
+
 可按正常容器创建方式进行创建，查看容器 IP 是否在规定范围内，以及容器是否可以和物理网络互通。
 
 如有固定 IP 需求，可参考 [Pod 固定 IP 和 Mac](../guide/static-ip-mac.md)
@@ -173,6 +178,47 @@ spec:
 如果需要 Underlay 和 Overlay 互通需要将子网的 `u2oInterconnection` 设置为 `true`，在这个情况下 Kube-OVN 会额外使用一个 Underlay IP 将 Underlay 子网
 和 `ovn-cluster` 逻辑路由器连接，并设置对应的路由规则实现互通。
 和逻辑网关不同，该方案只会连接 Kube-OVN 内部的 Underlay 和 Overlay 子网，其他访问外网的流量还是会通过物理网关进行转发。
+
+### 指定逻辑网关 IP
+
+开启互通功能后，会随机从 subnet 内的取一个 IP 作为逻辑网关，如果需要指定 Underlay Subnet 的逻辑网关可以指定字段 `u2oInterconnectionIP`。
+
+### 指定 Underlay Subnet 连接的自定义 VPC
+
+默认情况下 Underlay Subnet 会和默认 VPC 上的 Overlay Subnet 互通，如果要指定和某个 VPC 互通，在 `u2oInterconnection` 设置为 `true` 后，指定 `subnet.spec.vpc` 字段为该 VPC 名字即可。
+
+## 注意事项
+
+如果您使用的节点网卡上配置有 IP 地址，且操作系统是 Ubuntu 并通过 Netplan 配置网络，建议您将 Netplan 的 renderer 设置为 NetworkManager，并为节点网卡配置静态 IP 地址（关闭 DHCP）：
+
+```yaml
+network:
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      dhcp4: no
+      addresses:
+        - 172.16.143.129/24
+  version: 2
+```
+
+若节点网络管理服务为 NetworkManager，在使用节点网卡创建 ProviderNetwork 后，Kube-OVN 会将网卡从 NetworkManager 管理列表中移除（managed 属性为 no）：
+
+```shell
+root@ubuntu:~# nmcli device status
+DEVICE   TYPE      STATE      CONNECTION
+eth0     ethernet  unmanaged  netplan-eth0
+```
+
+如果您要修改网卡的 IP 或路由配置，需要手动将网卡重新加入 NetworkManager 管理列表：
+
+```sh
+nmcli device set eth0 managed yes
+```
+
+执行以上命令后，Kube-OVN 会将网卡上的 IP 及路由重新转移至 OVS 网桥，并再次将网卡从 NetworkManager 管理列表中移除。
+
+**注意**：节点网卡配置的动态修改仅支持 IP 和路由，不支持 MAC 地址的修改。
 
 ## 已知问题
 

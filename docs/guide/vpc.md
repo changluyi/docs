@@ -5,10 +5,11 @@ Kube-OVN 支持多租户隔离级别的 VPC 网络。不同 VPC 网络相互独�
 
 > VPC 主要用于有多租户网络强隔离的场景，部分 Kubernetes 网络功能在多租户网络下存在冲突。
 > 例如节点和 Pod 互访，NodePort 功能，基于网络访问的健康检查和 DNS 能力在多租户网络场景暂不支持。
-> 为了方便常见 Kubernetes 的使用场景，Kube-OVN 默认 VPC 做了特殊设计，该 VPC 下的 Subnet 
+> 为了方便常见 Kubernetes 的使用场景，Kube-OVN 默认 VPC 做了特殊设计，该 VPC 下的 Subnet
 > 可以满足 Kubernetes 规范。用户自定义 VPC 支持本文档介绍的静态路由，EIP 和 NAT 网关等功能。
 > 常见隔离需求可通过默认 VPC 下的网络策略和子网 ACL 实现，在使用自定义 VPC 前请明确是否需要
 > VPC 级别的隔离，并了解自定义 VPC 下的限制。
+> 在 Underlay 网络下，物理交换机负责数据面转发，VPC 无法对 Underlay 子网进行隔离。
 
 ![](../static/network-topology.png)
 
@@ -33,6 +34,7 @@ spec:
   namespaces:
   - ns2
 ```
+
 - `namespaces` 可以限定只有哪些 Namespace 可以使用当前 VPC，若为空则不限定。
 
 创建两个子网，分属两个不同的 VPC 并有相同的 CIDR:
@@ -74,7 +76,7 @@ metadata:
 spec:
   containers:
     - name: vpc1-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ---
 apiVersion: v1
 kind: Pod
@@ -86,7 +88,7 @@ metadata:
 spec:
   containers:
     - name: vpc2-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ```
 
 运行成功后可观察两个 Pod 地址属于同一个 CIDR，但由于运行在不同的租户 VPC，两个 Pod 无法相互访问。
@@ -125,25 +127,49 @@ spec:
       "cniVersion": "0.3.0",
       "type": "macvlan",
       "master": "eth1",
-      "mode": "bridge"
+      "mode": "bridge",
+      "ipam": {
+        "type": "kube-ovn",
+        "server_socket": "/run/openvswitch/kube-ovn-daemon.sock",
+        "provider": "ovn-vpc-external-network.kube-system"
+      }
     }'
 ```
 
-- 该 Subnet 用来管理可用的外部地址，请和网络管理沟通给出可用的物理段 IP。
+- 该 Subnet 用来管理可用的外部地址，网段内的地址将会通过 Macvlan 分配给 VPC 网关，请和网络管理沟通给出可用的物理段 IP。
 - VPC 网关使用 Macvlan 做物理网络配置，`NetworkAttachmentDefinition` 的 `master` 需为对应物理网路网卡的网卡名。
-- `name` 必须为 ovn-vpc-external-network，这里代码中做了硬编码。
+- `name` 外部网络名称。
+
+在 Macvlan 模式下，附属网卡会将数据包直接通过该节点网卡对外发送，L2/L3 层面的转发能力需要依赖底层网络设备。
+需要预先在底层网络设备配置对应的网关、Vlan 和安全策略等配置。
+
+1. 对于 OpenStack 的 VM 环境，需要将对应网络端口的 `PortSecurity` 关闭。
+2. 对于 VMware 的 vSwitch 网络，需要将 `MAC Address Changes`, `Forged Transmits` 和 `Promiscuous Mode Operation` 设置为 `allow`。
+3. 对于 Hyper-V 虚拟化，需要开启虚拟机网卡高级功能中的 `MAC Address Spoofing`。
+4. 公有云，例如 AWS、GCE、阿里云等由于不支持用户自定义 Mac 无法支持 Macvlan 模式网络。
+5. 由于 Macvlan 本身的限制，Macvlan 子接口无法访问父接口地址。
+6. 如果物理网卡对应交换机接口为 Trunk 模式，需要在该网卡上创建子接口再提供给 Macvlan 使用。
 
 ### 开启 VPC 网关功能
 
 VPC 网关功能需要通过 `kube-system` 下的 `ovn-vpc-nat-gw-config` 开启：
+
 ```yaml
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovn-vpc-nat-config
+  namespace: kube-system
+data:
+  image: 'docker.io/kubeovn/vpc-nat-gateway:{{ variables.version }}' 
+---
 kind: ConfigMap
 apiVersion: v1
 metadata:
   name: ovn-vpc-nat-gw-config
   namespace: kube-system
 data:
-  image: 'kubeovn/vpc-nat-gateway:{{ variables.version }}' 
   enable-vpc-nat-gw: 'true'
 ```
 
@@ -164,18 +190,27 @@ spec:
   selector:
     - "kubernetes.io/hostname: kube-ovn-worker"
     - "kubernetes.io/os: linux"
+  externalSubnets:
+    - ovn-vpc-external-network
 ```
 
-- `subnet`： 为 VPC 内某个 Subnet 名，VPC 网关 Pod 会在该子网下用 `lanIp` 来连接租户网络。
-- `lanIp`：`subnet` 内某个未被使用的 IP，VPC 网关 Pod 最终会使用该 Pod。
-- `selector`: VPC 网关 Pod 的节点选择器。
-- `nextHopIP`：需和 `lanIp` 相同。
+- `vpc`：该 VpcNatGateway 所属的 VPC。
+- `subnet`：为 VPC 内某个 Subnet 名，VPC 网关 Pod 会在该子网下用 `lanIp` 来连接租户网络。
+- `lanIp`：`subnet` 内某个未被使用的 IP，VPC 网关 Pod 最终会使用该 Pod。当 VPC 配置路由需要指向当前 VpcNatGateway 时 `nextHopIP` 需要设置为这个 `lanIp`。
+- `selector`：VpcNatGateway Pod 的节点选择器，格式和 Kubernetes 中的 NodeSelector 格式相同。
+- `externalSubnets`： VPC 网关使用的外部网络，如果不配置则默认使用 `ovn-vpc-external-network`，当前版本只支持配置一个外部网络。
+
+其他可配参数：
+
+- `tolerations` : 为 VPC 网关配置容忍度，具体配置参考 [污点和容忍度](https://kubernetes.io/zh-cn/docs/concepts/scheduling-eviction/taint-and-toleration/)。
+- `affinity` :  为 VPC 网关 Pod 或节点配置亲和性，具体设置参考 [亲和性与反亲和性](https://kubernetes.io/zh-cn/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity)。
 
 ### 创建 EIP
 
-EIP 为外部网络段的某个 IP 分配给 VPC 网关后可进行浮动IP，SNAT 和 DNAT 操作。
+EIP 为外部网络段的某个 IP 分配给 VPC 网关后可进行浮动 IP，SNAT 和 DNAT 操作。
 
 随机分配一个地址给 EIP：
+
 ```yaml
 kind: IptablesEIP
 apiVersion: kubeovn.io/v1
@@ -197,7 +232,22 @@ spec:
   v4ip: 10.0.1.111
 ```
 
+指定 EIP 所在的外部网络：
+
+```yaml
+kind: IptablesEIP
+apiVersion: kubeovn.io/v1
+metadata:
+  name: eip-random
+spec:
+  natGwDp: gw1
+  externalSubnet: ovn-vpc-external-network
+```
+
+- `externalSubnet`： EIP 所在外部网络名称，如果不指定则默认为 `ovn-vpc-external-network`，如果指定则必须为所在 VPC 网关的 `externalSubnets` 中的一个。
+
 ### 创建 DNAT 规则
+
 ```yaml
 kind: IptablesEIP
 apiVersion: kubeovn.io/v1
@@ -220,6 +270,7 @@ spec:
 ```
 
 ### 创建 SNAT 规则
+
 ```yaml
 ---
 kind: IptablesEIP
@@ -233,12 +284,13 @@ kind: IptablesSnatRule
 apiVersion: kubeovn.io/v1
 metadata:
   name: snat01
-spec
+spec:
   eip: eips01
   internalCIDR: 10.0.1.0/24
 ```
 
 ### 创建浮动 IP
+
 ```yaml
 ---
 kind: IptablesEIP
@@ -264,6 +316,7 @@ spec:
 Kube-OVN 支持静态路由和更为灵活的策略路由。
 
 ### 静态路由
+
 ```yaml
 kind: Vpc
 apiVersion: kubeovn.io/v1
@@ -277,10 +330,12 @@ spec:
     - cidr: 172.31.0.0/24
       nextHopIP: 10.0.1.253
       policy: policySrc
+      routeTable: "rtb1"
 ```
 
 - `policy`: 支持目的地址路由 `policyDst` 和源地址路由 `policySrc`。
 - 当路由规则存在重叠时，CIDR 掩码较长的规则优先级更高，若掩码长度相同则目的地址路由优先于源地址路由。
+- `routeTable`: 可指定静态路由所在的路由表，默认在主路由表。子网关联路由表请参考[创建子网](subnet.md/#_5)
 
 ### 策略路由
 
@@ -288,6 +343,7 @@ spec:
 和更多的转发动作。该功能为 OVN 内部逻辑路由器策略功能的一个对外暴露，更多使用信息请参考 [Logical Router Policy](https://man7.org/linux/man-pages/man5/ovn-nb.5.html#Logical_Router_Policy_TABLE){: target = "_blank" }。
 
 简单示例如下：
+
 ```yaml
 kind: Vpc
 apiVersion: kubeovn.io/v1
@@ -415,11 +471,91 @@ data:
 
 - `enable-vpc-dns`：（可缺省）`true` 启用功能，`false` 关闭功能。默认 `true`。
 - `coredns-image`：（可省略）：dns 部署镜像。默认为集群 coredns 部署版本。
+- `coredns-template`：（可省略）：dns 部署模板所在的 URL。默认：当前版本仓库里的 `yamls/coredns-template.yaml`。
 - `coredns-vip`：为 coredns 提供 lb 服务的 vip。
 - `nad-name`：配置的 `network-attachment-definitions` 资源名称。
 - `nad-provider`：使用的 provider 名称。
 - `k8s-service-host`：（可缺省） 用于 coredns 访问 k8s apiserver 服务的 ip。
 - `k8s-service-port`：（可缺省）用于 coredns 访问 k8s apiserver 服务的 port。
+
+### 部署 vpc-dns 依赖资源
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:vpc-dns
+rules:
+  - apiGroups:
+    - ""
+    resources:
+    - endpoints
+    - services
+    - pods
+    - namespaces
+    verbs:
+    - list
+    - watch
+  - apiGroups:
+    - discovery.k8s.io
+    resources:
+    - endpointslices
+    verbs:
+    - list
+    - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: vpc-dns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:vpc-dns
+subjects:
+- kind: ServiceAccount
+  name: vpc-dns
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vpc-dns
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpc-dns-corefile
+  namespace: kube-system
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health {
+          lameduck 5s
+        }
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+        }
+        prometheus :9153
+        forward . /etc/resolv.conf {
+          prefer_udp
+        }
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+```
 
 ### 部署 vpc-dns
 
@@ -436,7 +572,6 @@ spec:
 - `vpc`： 用于部署 dns 组件的 vpc 名称。
 - `subnet`：用于部署 dns 组件的子名称。
 
-
 查看资源信息：
 
 ```bash
@@ -446,10 +581,10 @@ test-cjh1   false    cjh-vpc-1   cjh-subnet-1
 test-cjh2   true     cjh-vpc-1   cjh-subnet-2 
 ```
 
-- `ACTIVE`: `true` 部署了自定义 dns 组件，`false` 无部署
+- `ACTIVE`: `true` 成功部署了自定义 dns 组件，`false` 无部署
 
 ### 限制
 
 - 一个 vpc 下只会部署一个自定义 dns 组件;
 - 当一个 vpc 下配置多个 vpc-dns 资源（即同一个 vpc 不同的 subnet），只有一个 vpc-dns 资源状态 `true`，其他为 `fasle`;
-- 当 `ture` 的 vpc-dns 被删除掉，会获取其他 `false` 的 vpc-dns 进行部署。
+- 当 `true` 的 vpc-dns 被删除掉，会获取其他 `false` 的 vpc-dns 进行部署。

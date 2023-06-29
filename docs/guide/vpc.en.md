@@ -1,17 +1,18 @@
 # Config VPC
 
-Kube-OVN supports multi-tenant isolation level VPC networks. Different VPC networks are independent of each other 
+Kube-OVN supports multi-tenant isolation level VPC networks. Different VPC networks are independent of each other
 and can be configured separately with Subnet CIDRs, routing policies, security policies, outbound gateways, EIP, etc.
 
-> VPC is mainly used in scenarios where there requires strong isolation of multi-tenant networks 
+> VPC is mainly used in scenarios where there requires strong isolation of multi-tenant networks
 > and some Kubernetes networking features conflict under multi-tenant networks.
-> For example, node and pod access, NodePort functionality, network access-based health checks, 
+> For example, node and pod access, NodePort functionality, network access-based health checks,
 > and DNS capabilities are not supported in multi-tenant network scenarios at this time.
-> In order to facilitate common Kubernetes usage scenarios, Kube-OVN has a special design for the default 
+> In order to facilitate common Kubernetes usage scenarios, Kube-OVN has a special design for the default
 > VPC where the Subnet under the VPC can meet the Kubernetes specification.
 > The custom VPC supports static routing, EIP and NAT gateways as described in this document.
-> Common isolation requirements can be achieved through network policies and Subnet ACLs under the default VPC, 
+> Common isolation requirements can be achieved through network policies and Subnet ACLs under the default VPC,
 > so before using a custom VPC, please make sure whether you need VPC-level isolation and understand the limitations under the custom VPC.
+> For Underlay subnets, physical switches are responsible for data-plane forwarding, so VPCs cannot isolate Underlay subnets.
 
 ![](../static/network-topology.png)
 
@@ -36,6 +37,7 @@ spec:
   namespaces:
     - ns2
 ```
+
 - `namespaces`: Limit which namespaces can use this VPC. If empty, all namespaces can use this VPC.
 
 Create two Subnets, belonging to two different VPCs and having the same CIDR:
@@ -77,7 +79,7 @@ metadata:
 spec:
   containers:
     - name: vpc1-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ---
 apiVersion: v1
 kind: Pod
@@ -89,10 +91,10 @@ metadata:
 spec:
   containers:
     - name: vpc2-pod
-      image: nginx:alpine
+      image: docker.io/library/nginx:alpine
 ```
 
-After running successfully, you can observe that the two Pod addresses belong to the same CIDR, 
+After running successfully, you can observe that the two Pod addresses belong to the same CIDR,
 but the two Pods cannot access each other because they are running on different tenant VPCs.
 
 ## Create VPC NAT Gateway
@@ -128,26 +130,50 @@ spec:
       "cniVersion": "0.3.0",
       "type": "macvlan",
       "master": "eth1",
-      "mode": "bridge"
+      "mode": "bridge",
+      "ipam": {
+        "type": "kube-ovn",
+        "server_socket": "/run/openvswitch/kube-ovn-daemon.sock",
+        "provider": "ovn-vpc-external-network.kube-system"
+      }
     }'
 ```
 
-- This Subnet is used to manage the available external addresses, so please communicate with your network management to give you the available physical segment IPs.
+- This Subnet is used to manage the available external addresses and the address will be allocated to VPC NAT Gateway through Macvlan, so please communicate with your network management to give you the available physical segment IPs.
 - The VPC gateway uses Macvlan for physical network configuration, and `master` of `NetworkAttachmentDefinition` should be the NIC name of the corresponding physical network NIC.
-- `name` must be `ovn-vpc-external-network`.
+- `name`: External network name.
+
+For macvlan mode, the nic will send packets directly through that node NIC,
+relying on the underlying network devices for L2/L3 level forwarding capabilities. You need to configure the corresponding gateway,
+Vlan and security policy in the underlying network device in advance.
+
+1. For OpenStack VM environments, you need to turn off `PortSecurity` on the corresponding network port.
+2. For VMware vSwitch networks, `MAC Address Changes`, `Forged Transmits` and `Promiscuous Mode Operation` should be set to `allow`.
+3. For Hyper-V virtualization,  `MAC Address Spoofing` should be enabled in VM nic advanced features.
+4. Public clouds, such as AWS, GCE, AliCloud, etc., do not support user-defined Mac, so they cannot support Macvlan mode network.
+5. Due to the limitations of Macvlan, the Macvlan sub-interface cannot access the parent interface address.
+6. If the physical network card corresponds to a switch interface in Trunk mode, a sub-interface needs to be created on the network card and provided to Macvlan for use.
 
 ### Enabling the VPC Gateway
 
 VPC gateway functionality needs to be enabled via `ovn-vpc-nat-gw-config` under `kube-system`:
 
 ```yaml
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovn-vpc-nat-config
+  namespace: kube-system
+data:
+  image: docker.io/kubeovn/vpc-nat-gateway:{{ variables.version }}
+---
 kind: ConfigMap
 apiVersion: v1
 metadata:
   name: ovn-vpc-nat-gw-config
   namespace: kube-system
 data:
-  image: 'kubeovn/vpc-nat-gateway:{{ variables.version }}' 
   enable-vpc-nat-gw: 'true'
 ```
 
@@ -168,12 +194,20 @@ spec:
   selector:
     - "kubernetes.io/hostname: kube-ovn-worker"
     - "kubernetes.io/os: linux"
+  externalSubnets:
+    - ovn-vpc-external-network
 ```
 
+- `vpc`: The VPC to which this VpcNatGateway belongs.
 - `subnet`: A Subnet within the VPC, the VPC Gateway Pod will use `lanIp` to connect to the tenant network under that subnet.
-- `lanIp`: An unused IP within the `subnet` that the VPC Gateway Pod will eventually use for the Pod.
-- `selector`: Node selector for the VPC Gateway Pod.
-- `nextHopIP`: Needs to be the same as `lanIp`.
+- `lanIp`: An unused IP within the `subnet` that the VPC Gateway Pod will eventually use for the Pod. When configuring routing for a VPC, the  `nextHopIP` needs to be set to the `lanIp` of the current VpcNatGateway.
+- `selector`: The node selector for VpcNatGateway Pod has the same format as NodeSelector in Kubernetes.
+- `externalSubnets`: External network used by the VPC gateway, if not configured, `ovn-vpc-external-network` is used by default, and only one external network is supported in the current version.
+
+Other configurable parameters:
+
+- `tolerations`: Configure tolerance for the VPC gateway. For details, see [Taints and Tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/#taint-nodes-by-condition)
+- `affinity`: Configure affinity for the Pod or node of the VPC gateway. For details, see [Assigning Pods to Nodes](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity)
 
 ### Create EIP
 
@@ -201,6 +235,20 @@ spec:
   natGwDp: gw1
   v4ip: 10.0.1.111
 ```
+
+Specify the external network on which the EIP is located:
+
+```yaml
+kind: IptablesEIP
+apiVersion: kubeovn.io/v1
+metadata:
+  name: eip-random
+spec:
+  natGwDp: gw1
+  externalSubnet: ovn-vpc-external-network
+```
+
+- `externalSubnet`: The name of the external network on which the EIP is located. If not specified, it defaults to `ovn-vpc-external-network`. If specified, it must be one of the `externalSubnets` of the VPC gateway.
 
 ### Create DNAT Rules
 
@@ -240,7 +288,7 @@ kind: IptablesSnatRule
 apiVersion: kubeovn.io/v1
 metadata:
   name: snat01
-spec
+spec:
   eip: eips01
   internalCIDR: 10.0.1.0/24
 ```
@@ -286,11 +334,13 @@ spec:
     - cidr: 172.31.0.0/24
       nextHopIP: 10.0.1.253
       policy: policySrc
+      routeTable: "rtb1"
 ```
 
 - `policy`: Supports destination routing `policyDst` and source routing `policySrc`.
-- When there are overlapping routing rules, the rule with the longer CIDR mask has higher priority, 
+- When there are overlapping routing rules, the rule with the longer CIDR mask has higher priority,
   and if the mask length is the same, the destination route has a higher priority over the source route.
+- `routeTable`: You can store the route in specific table, default is main table. Associate with subnet please defer to [Create Custom Subnets](subnet.en.md/#_5)
 
 ### Policy Routes
 
@@ -298,7 +348,7 @@ Traffic matched by static routes can be controlled at a finer granularity by pol
 Policy routing provides more precise matching rules, priority control and more forwarding actions.
 This feature brings the OVN internal logical router policy function directly to the outside world, for more information on its use, please refer to [Logical Router Policy](https://man7.org/linux/man-pages/man5/ovn-nb.5.html#Logical_Router_Policy_TABLE){: target = "_blank" }.
 
-A example of policy routes:
+An example of policy routes:
 
 ```yaml
 kind: Vpc
@@ -314,4 +364,18 @@ spec:
       match: ip4.src==10.0.1.0/24
       nextHopIP: 10.0.1.252
       priority: 10
+```
+
+## *Custom VPC Image
+
+The image used for VPC could be configured via `ovn-vpc-nat-config`  under `kube-system`:
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ovn-vpc-nat-config
+  namespace: kube-system
+data:
+  image: docker.io/kubeovn/vpc-nat-gateway:{{ variables.version }}
 ```

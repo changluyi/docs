@@ -9,14 +9,16 @@ nav:
       - 准备工作: 'start/prepare.md'
       - 一键安装: 'start/one-step-install.md'
       - Underlay 网络安装: 'start/underlay.md'
-      - 使用 sealos 一键部署 Kubernetes 和 Kube-OVN: 'start/sealos-install.md'
+      - 使用 Sealos 一键部署 Kubernetes 和 Kube-OVN: 'start/sealos-install.md'
       - 卸载: 'start/uninstall.md'
   - 使用指南:
       - 安装和配置选项: 'guide/setup-options.md'
       - 固定地址: 'guide/static-ip-mac.md'
+      - 自定义路由: 'guide/custom-routes.md'
       - 子网使用: 'guide/subnet.md'
       - LoadBalancer 类型 Service: 'guide/loadbalancer-service.md'
       - VPC 使用: 'guide/vpc.md'
+      - VPC QoS 配置: 'guide/vpc-qos.md'
       - 容器网络 QoS 配置: 'guide/qos.md'
       - 配置监控和面板: 'guide/prometheus-grafana.md'
       - 配置原生 Prometheus: 'guide/prometheus.md'
@@ -26,13 +28,14 @@ nav:
       - NetworkPolicy 日志: 'guide/networkpolicy-log.md'
       - Webhook 使用: 'guide/webhook.md'
   - 运维指南:
-      - kubectl 插件使用: 'ops/kubectl-ko.md'
+      - Kubectl 插件使用: 'ops/kubectl-ko.md'
       - 删除工作节点: 'ops/delete-worker-node.md'
       - 更换 ovn-central 节点: 'ops/change-ovn-central-node.md'
       - OVN 数据库备份和恢复: 'ops/recover-db.md'
       - 修改子网 CIDR: 'ops/change-default-subnet.md'
       - 修改 Join 子网 CIDR: 'ops/change-join-subnet.md'
       - 卸载 Calico 安装 Kube-OVN: 'ops/from-calico.md'
+      - 调整日志等级: 'ops/change-log-level.md'
       - 其他常见问题: 'ops/faq.md'
   - 高级功能:
       - 多网卡管理: 'advance/multi-nic.md'
@@ -57,15 +60,24 @@ nav:
       - Windows 支持: 'advance/windows.md'
       - DPDK 支持: 'advance/dpdk.md'
       - OpenStack 集成: 'advance/with-openstack.md'
+      - OVN EIP FIP SNAT 支持: 'advance/ovn-eip-fip-snat.md'
+      - OVN SNAT 基于 ECMP BFD 静态路由的 L3 HA 支持: 'advance/ovn-l3-ha-based-ecmp-with-bfd.md'
+      - SecurityGroup 使用: 'advance/security-group.md'
+      - OVN IPsec 支持: 'advance/ovn-ipsec.md'
+      - OVN 流量镜像: 'advance/ovn-remote-port-mirroring.md'
+      - 节点本地 DNS 缓存和 Kube-OVN 适配 : 'advance/node-local-dns.md'
+      - NAT 策略规则功能 : 'advance/nat-policy-rule.md'
   - 技术参考:
       - 总体架构: 'reference/architecture.md'
       - 功能成熟度: 'reference/feature-stage.md'
       - Underlay 流量拓扑: 'reference/underlay-topology.md'
       - Iptables 规则: 'reference/iptables-rules.md'
+      - kube-ovn-pinger 参数描述: 'reference/kube-ovn-pinger-args.md'
       - 开发环境构建: 'reference/dev-env.md'
       - 对上游 OVS/OVN 修改: 'reference/ovs-ovn-customized.md'
       - 隧道协议说明: 'reference/tunnel-protocol.md'
       - Kube-OVN 监控指标: 'reference/metrics.md'
+      - Kube-OVN 接口规范: 'reference/kube-ovn-api.md'
       - 文档规范: 'reference/document-convention.md'
   - 联系方式: 'contact.md'
 theme:
@@ -136,17 +148,21 @@ plugins:
           卸载: Uninstall
           安装和配置选项: Installation and Configuration Options
           固定地址: Fixed Addresses
+          自定义路由: Custom Routes
           子网使用: Config Subnet
           LoadBalancer 类型 Service: LoadBalancer Type Service
           VPC 使用: Config VPC
+          VPC QoS 配置: VPC QoS
           容器网络 QoS 配置: Manage QoS
           配置监控和面板: Monitor and Dashboard
           双栈使用: DualStack
           EIP 和 SNAT 配置: EIP and SNAT
+          OVN EIP FIP SNAT 支持: Support OVN EIP,FIP and SNAT
+          OVN SNAT 基于 ECMP BFD 静态路由的 L3 HA 支持: Support OVN SNAT L3 HA Based ECMP and BFD Static Route
           流量镜像: Traffic Mirror
           NetworkPolicy 日志: NetworkPolicy Logging
           Webhook 使用: Webhook
-          kubectl 插件使用: Kubectl Plugin
+          Kubectl 插件使用: Kubectl Plugin
           删除工作节点: Deleting Work Node
           更换 ovn-central 节点: Replace ovn-central Node
           OVN 数据库备份和恢复: OVN DB Backup and Recovery
@@ -157,10 +173,13 @@ plugins:
           多网卡管理: Manage Multiple Interface
           性能调优: Performance Tuning
           手动编译 FastPath 模块: Compile FastPath Module
+          使用 eBPF 加速节点内 TCP 通信: Accelerate TCP Communication in Node with eBPF
           使用 OVN-IC 进行多集群互联: Cluster Inter-Connection with OVN-IC
           使用 Submariner 进行多集群互联: Cluster Inter-Connection with Submariner
           BGP 支持: BGP Support
           Cilium 集成: Integration with Cilium
+          Cilium NetworkPolicy 支持: Cilium NetworkPolicy Support
+          Cilium 网络流量观测: Cilium Network Traffic Observation
           DHCP 设置: DHCP
           VPC 互联: VPC Peering
           外部网关设置: External Gateway
@@ -181,8 +200,17 @@ plugins:
           功能成熟度: Feature Stage
           配置原生 Prometheus: Config Native Prometheus
           Iptables 规则: Iptables Rules
+          kube-ovn-pinger 参数描述: kube-ovn-pinger args description
           自定义 VPC 内部负载均衡: VPC Internal Load Balancer
           自定义 VPC DNS: VPC DNS
+          Kube-OVN 接口规范: Kube-OVN API Reference
+          SecurityGroup 使用: SecurityGroup Usage
+          OVN IPsec 支持: OVN IPsec Support
+          OVN 流量镜像: OVN Remote Port Mirroring
+          节点本地 DNS 缓存和 Kube-OVN 适配 : Node Local DNS Cache and Kube-OVN Adaptation
+          NAT 策略规则功能 : NAT Policy Rule Function
+          调整日志等级: Change Log Level
+          使用 Sealos 一键部署 Kubernetes 和 Kube-OVN: Use Sealos to Deploy Kubernetes and Kube-OVN
   - git-revision-date-localized:
       type: date
       enable_creation_date: true
@@ -202,7 +230,7 @@ extra:
     - icon: fontawesome/brands/weixin
       link: https://ma.alauda.cn/p/0f39a
     - icon: fontawesome/brands/slack
-      link: https://kube-ovn-slackin.herokuapp.com/
+      link: https://communityinviter.com/apps/kube-ovn/kube-ovn/
     - icon: fontawesome/brands/twitter
       link: https://twitter.com/kubeovn
     - icon: fontawesome/brands/github
@@ -210,6 +238,6 @@ extra:
     - icon: fontawesome/brands/docker
       link: https://hub.docker.com/r/kubeovn/kube-ovn
   variables:
-    version: v1.11.0
-    branch: release-1.11
+    version: v1.12.0
+    branch: master
 copyright: Copyright &copy; 2023 The Linux Foundation

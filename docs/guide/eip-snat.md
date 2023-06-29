@@ -43,7 +43,7 @@ data:
 
 ## 观察 OVN 和 OVS 状态确认配置生效
 
-检查 OVN-NB 状态, 确认 `ovn-external` 逻辑交换机存在，并且 `ovn-cluster-ovn-external` 
+检查 OVN-NB 状态, 确认 `ovn-external` 逻辑交换机存在，并且 `ovn-cluster-ovn-external`
 逻辑路由器端口上 绑定了正确的地址和 chassis。
 
 ```bash
@@ -93,7 +93,7 @@ metadata:
 spec:
   containers:
   - name: snat-pod
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ---
 apiVersion: v1
 kind: Pod
@@ -104,7 +104,7 @@ metadata:
 spec:
   containers:
   - name: eip-pod
-    image: nginx:alpine
+    image: docker.io/library/nginx:alpine
 ```
 
 可通过 kubectl 或其他工具动态调整 Pod 所配置的 EIP 或 SNAT 规则，更改时请注意要同时删除 `ovn.kubernetes.io/routed` annotation
@@ -114,6 +114,8 @@ spec:
 kubectl annotate pod pod-gw ovn.kubernetes.io/eip=172.56.0.221 --overwrite
 kubectl annotate pod pod-gw ovn.kubernetes.io/routed-
 ```
+
+当 EIP 或 SNAT 规则生效后，`ovn.kubernetes.io/routed` annotation 会被重新添加。
 
 ## 高级配置
 
